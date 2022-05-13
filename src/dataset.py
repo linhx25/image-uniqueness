@@ -6,13 +6,18 @@ import numpy as np
 import pandas as pd
 from PIL import ImageFilter
 import random
+import torchvision
 
 
 class AirbnbDataLoader(DataLoader):
+    ## TODO: add transform
     def __init__(
         self, root: str, batch_size=1, shuffle=True, sampler=None, drop_last=True
     ):
-        self.files = glob.glob(root + "/*.h5")
+        if root.endswith(".h5"):
+            self.files = [root]
+        else:
+            self.files = glob.glob(root + "/*.h5")
         self.batch_size = batch_size
         self.sampler = sampler
         self.drop_last = drop_last
@@ -83,12 +88,16 @@ class AirbnbDataLoader(DataLoader):
 
 
 class AirbnbDataset(Dataset):
-    def __init__(self, root: str):
-        self.files = glob.glob(root + "/*.h5")
+    def __init__(self, root: str, transform=None):
+        if root.endswith(".h5"):
+            self.files = [root]
+        else:
+            self.files = glob.glob(root + "/*.h5")
 
         self.ds = [h5py.File(f, "r") for f in self.files]
         self.dt_len = [len(f["IDs"]) for f in self.ds]
         self.idx_mapping = self._index2items()
+        self.transform = transform
 
     def _index2items(self):
         idx_range = []
@@ -117,10 +126,12 @@ class AirbnbDataset(Dataset):
         idx_image = self.idx_mapping.iat[idx, 1]
         ds = self.ds[idx_file]
         images, ids = ds["images"], ds["IDs"]
-        return {
-            "image": images[idx_image].reshape(224, 224, 3).astype("uint8"),
-            "label": ids[idx_image],
-        }
+        img = images[idx_image].reshape(224, 224, 3).astype("uint8")
+        
+        if self.transform:
+            img = torchvision.transforms.ToPILImage()(img)
+            img = self.transform(img)
+        return {"image": img, "label": ids[idx_image],}
 
 
 class TwoCropsTransform:
