@@ -35,8 +35,8 @@ def set_seed(seed=42, cuda_deterministic=True):
 def pprint(*args):
     # print with current time
     time = "[" + datetime.now().strftime("%Y-%m-%d %H:%M:%S") + "] -"
-    # if torch.distributed.get_rank() == 0: ## DDP
-    print(time, *args, flush=True)
+    if torch.distributed.get_rank() == 0: ## DDP
+        print(time, *args, flush=True)
 
 
 def _freeze_modules(epoch, model, args):
@@ -61,7 +61,7 @@ def _freeze_modules(epoch, model, args):
         pprint("..unfreeze modules:")
         grad = True
 
-    for name, module in model.named_children():  ## DDP: model.module
+    for name, module in model.module.named_children():  ## DDP: model.module
         if (freeze and name in modules) or (not freeze and name not in modules):
             print(name, end=", ")
             for param in module.parameters():
@@ -132,7 +132,7 @@ global_step = -1
 def train_epoch(epoch, model, optimizer, scheduler, data_loader, writer, args):
 
     global global_step
-    # data_loader.sampler.set_epoch(epoch) ## DDP
+    data_loader.sampler.set_epoch(epoch) ## DDP
     loss_fn = nn.CrossEntropyLoss().to(args.device)
 
     _freeze_modules(epoch, model, args)
@@ -141,7 +141,8 @@ def train_epoch(epoch, model, optimizer, scheduler, data_loader, writer, args):
     cnt = 0
     len_loop = min(args.max_iter_epoch, len(data_loader))
 
-    for batch in tqdm(data_loader, total=len_loop, disable=(args.local_rank != 0)):
+    for batch in tqdm(data_loader, total=len_loop, 
+        disable=(args.local_rank % torch.cuda.device_count() != 0)):
         if cnt > args.max_iter_epoch:
             break
         cnt += 1
@@ -172,7 +173,7 @@ def train_epoch(epoch, model, optimizer, scheduler, data_loader, writer, args):
 
     # save log
     if writer:
-        for name, param in model.named_parameters():  # DDP: model.module
+        for name, param in model.named_parameters():  # DDP: model.module or model
             writer.add_histogram(name, param, epoch)
             if param.grad is not None:
                 writer.add_histogram(name + ".grad", param.grad, epoch)
@@ -185,7 +186,9 @@ def inference(model, data_loader, args, prefix="Test"):
 
     preds = []  # unique score = contrastive loss
 
-    for batch in tqdm(data_loader, desc=prefix, total=len(data_loader)):
+    for batch in tqdm(
+        data_loader, desc=prefix, total=len(data_loader), 
+        disable=(args.local_rank % torch.cuda.device_count() != 0)):
 
         images, ids = batch["image"], batch["label"]
         images[0] = images[0].to(args.device)
@@ -204,9 +207,9 @@ def inference(model, data_loader, args, prefix="Test"):
 
 def main(args):
 
-    # torch.cuda.set_device(args.local_rank) ## DDP
-    # torch.distributed.init_process_group(backend="nccl") ## DDP
-    set_seed(args.seed)  ## DDP: args.seed + args.local_rank
+    torch.cuda.set_device(args.local_rank) ## DDP
+    torch.distributed.init_process_group(backend="nccl") ## DDP
+    set_seed(args.seed + args.local_rank, False)  ## DDP: args.seed + args.local_rank
 
     outdir = args.outdir + "/" + datetime.now().strftime("%m-%d_%H:%M:%S")
     if not os.path.exists(outdir) and args.local_rank == 0:
@@ -234,7 +237,7 @@ def main(args):
     train_ds = src.dataset.AirbnbDataset(args.data_dir, transform=transform_train)
 
     # dataloader
-    sampler = None  # torch.utils.data.distributed.DistributedSampler(train_ds) ## DDP
+    sampler = torch.utils.data.distributed.DistributedSampler(train_ds) ## DDP
     train_loader = torch.utils.data.DataLoader(
         train_ds,
         batch_size=args.batch_size,
@@ -247,7 +250,7 @@ def main(args):
 
     # model setting
     arch = torchvision.models.__dict__[args.arch]
-    model = src.model.MoCo(arch)
+    model = src.model.MoCo(arch, pretrained=False, ddp=True)
     if args.init_state:
         pprint("load model init state")
         res = load_state_dict_unsafe(
@@ -255,12 +258,12 @@ def main(args):
         )
         pprint(res)
     model.to(args.device)
-    # model = nn.parallel.DistributedDataParallel(
-    #     model,
-    #     find_unused_parameters=True,
-    #     device_ids=[args.local_rank],
-    #     output_device=args.local_rank,
-    # ) ## DDP
+    model = nn.parallel.DistributedDataParallel(
+        model,
+        find_unused_parameters=(args.freeze_modules != ""),
+        device_ids=[args.local_rank],
+        output_device=args.local_rank,
+    ) ## DDP
 
     # optimizer
     optimizer = torch.optim.SGD(
@@ -278,16 +281,15 @@ def main(args):
 
         pprint("training...")
         train_epoch(epoch, model, optimizer, scheduler, train_loader, writer, args=args)
-
-        if epoch % 4 == 0 and args.local_rank == 0:
-            torch.save(model.state_dict(), outdir + "/model.pt")  ## DDP: model.module
+        
+        if (epoch % 4 == 0) and (args.local_rank == 0):
+            torch.save(model.module.state_dict(), outdir + "/model.pt")  ## DDP: model.module
 
     # inference
     scores = {}
     preds = inference(model, train_loader, args, "Inference-train")
-    
-    if args.local_rank == 0:     
 
+    if args.local_rank == 0:
         preds.to_pickle(outdir + f"/train_loss.pkl")
         args.device = "cuda:0"
         info = dict(
@@ -335,7 +337,7 @@ def parse_args():
     parser.add_argument("--outdir", default="./output")
     parser.add_argument("--overwrite", action="store_true")
     parser.add_argument("--save_ckpts", action="store_true")
-    parser.add_argument("--local_rank", type=int, default=0)
+    parser.add_argument("--local_rank", type=int, default=int(os.environ["LOCAL_RANK"]))
     parser.add_argument(
         "--comments", default="", help="add comments without indent and dash`-`"
     )
