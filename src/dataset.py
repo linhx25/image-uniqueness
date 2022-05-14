@@ -71,11 +71,12 @@ class AirbnbDataLoader(DataLoader):
                 idx_range.append(range(stops[i - 1], stops[i]))
 
         idx = np.arange(stops[-1])
-        res = pd.DataFrame(np.zeros((stops[-1], 2)), columns=["idx_file", "idx_image"])
+        res = pd.DataFrame(np.zeros((stops[-1], 3)), columns=["idx_file", "idx_image", "image_id"])
         for i in range(len(idx_range)):
             flag = np.isin(idx, idx_range[i])
             res.loc[flag, "idx_file"] = i
             res.loc[flag, "idx_image"] = idx[flag] - idx_range[i].start
+            res.loc[flag, "image_id"] = self.ds[i]["IDs"][()]
 
         return res.astype(int)
 
@@ -109,11 +110,12 @@ class AirbnbDataset(Dataset):
                 idx_range.append(range(stops[i - 1], stops[i]))
 
         idx = np.arange(stops[-1])
-        res = pd.DataFrame(np.zeros((stops[-1], 2)), columns=["idx_file", "idx_image"])
+        res = pd.DataFrame(np.zeros((stops[-1], 3)), columns=["idx_file", "idx_image", "image_id"])
         for i in range(len(idx_range)):
             flag = np.isin(idx, idx_range[i])
             res.loc[flag, "idx_file"] = i
             res.loc[flag, "idx_image"] = idx[flag] - idx_range[i].start
+            res.loc[flag, "image_id"] = self.ds[i]["IDs"][()]
 
         return res.astype(int)
 

@@ -61,7 +61,12 @@ def _freeze_modules(epoch, model, args):
         pprint("..unfreeze modules:")
         grad = True
 
-    for name, module in model.module.named_children():  ## DDP: model.module
+    for name, module in model.module.encoder_q.named_children():  ## DDP: model.module
+        if (freeze and name in modules) or (not freeze and name not in modules):
+            print(name, end=", ")
+            for param in module.parameters():
+                param.requires_grad_(grad)
+    for name, module in model.module.encoder_k.named_children():  ## DDP: model.module
         if (freeze and name in modules) or (not freeze and name not in modules):
             print(name, end=", ")
             for param in module.parameters():
@@ -182,7 +187,7 @@ def train_epoch(epoch, model, optimizer, scheduler, data_loader, writer, args):
 def inference(model, data_loader, args, prefix="Test"):
 
     model.eval()
-    loss_fn = nn.CrossEntropyLoss().to(args.device)
+    loss_fn = nn.CrossEntropyLoss(reduction="none").to(args.device)
 
     preds = []  # unique score = contrastive loss
 
@@ -250,7 +255,7 @@ def main(args):
 
     # model setting
     arch = torchvision.models.__dict__[args.arch]
-    model = src.model.MoCo(arch, pretrained=False, ddp=True)
+    model = src.model.MoCo(arch, pretrained=args.pretrained, ddp=True)
     if args.init_state:
         pprint("load model init state")
         res = load_state_dict_unsafe(
@@ -309,7 +314,7 @@ def parse_args():
     # model
     parser.add_argument("--out_feat", type=int, default=6)
     parser.add_argument("--init_state", default="")
-    parser.add_argument("--model", default="resnet18")
+    parser.add_argument("--pretrained", action="store_true")
     parser.add_argument("--arch", default="alexnet")
 
     # training
