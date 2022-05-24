@@ -132,8 +132,6 @@ def accuracy(output, target, topk=(1,)):
 
 
 global_step = -1
-
-
 def train_epoch(epoch, model, optimizer, scheduler, data_loader, writer, args):
 
     global global_step
@@ -291,7 +289,6 @@ def main(args):
             torch.save(model.module.state_dict(), outdir + "/model.pt")  ## DDP: model.module
 
     # inference
-    scores = {}
     preds = inference(model, train_loader, args, "Inference-train")
 
     if args.local_rank == 0:
@@ -299,7 +296,6 @@ def main(args):
         args.device = "cuda:0"
         info = dict(
             config=vars(args),
-            scores=scores,
         )
 
         with open(outdir + "/info.json", "w") as f:
