@@ -10,7 +10,7 @@ class MoCo(nn.Module):
     https://arxiv.org/abs/1911.05722
     """
 
-    def __init__(self, base_encoder, dim=128, K=65536, m=0.999, T=0.07, ddp=False):
+    def __init__(self, base_encoder, dim=128, K=65536, m=0.999, T=0.07, pretrained=False, ddp=False):
         """
         dim: feature dimension (default: 128)
         K: queue size; number of negative keys (default: 65536)
@@ -26,8 +26,14 @@ class MoCo(nn.Module):
 
         # create the encoders
         # num_classes is the output fc dimension
-        self.encoder_q = base_encoder(num_classes=dim)
-        self.encoder_k = base_encoder(num_classes=dim)
+        if pretrained:
+            self.encoder_q = base_encoder(pretrained=True)
+            self.encoder_q.fc = nn.Linear(self.encoder_q.fc.in_features, dim)
+            self.encoder_k = base_encoder(pretrained=True)
+            self.encoder_k.fc = nn.Linear(self.encoder_k.fc.in_features, dim)
+        else:
+            self.encoder_q = base_encoder(num_classes=dim)
+            self.encoder_k = base_encoder(num_classes=dim)
 
         for param_q, param_k in zip(
             self.encoder_q.parameters(), self.encoder_k.parameters()
