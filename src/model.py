@@ -78,7 +78,6 @@ class MoCo(nn.Module):
     def _batch_shuffle_ddp(self, x):
         """
         Batch shuffle, for making use of BatchNorm.
-        *** Only support DistributedDataParallel (DDP) model. ***
         """
         # gather from all gpus
         batch_size_this = x.shape[0]
@@ -109,7 +108,6 @@ class MoCo(nn.Module):
     def _batch_unshuffle_ddp(self, x, idx_unshuffle):
         """
         Undo batch shuffle.
-        *** Only support DistributedDataParallel (DDP) model. ***
         """
         # gather from all gpus
         batch_size_this = x.shape[0]

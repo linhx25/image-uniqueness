@@ -289,7 +289,7 @@ def main(args):
         output_device=args.local_rank,
     ) ## DDP
 
-    # initialize the model memory bank if use full dataset for comparision
+    # initialize the model memory bank before training
     if args.use_fullset:
         init_memory_bank(model, train_loader, args)
 
