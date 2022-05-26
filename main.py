@@ -247,7 +247,7 @@ def main(args):
 
     # model setting
     arch = torchvision.models.__dict__[args.arch]
-    model = src.model.MoCo(arch)
+    model = src.model.MoCo(arch, pretrained=args.pretrained)
     if args.init_state:
         pprint("load model init state")
         res = load_state_dict_unsafe(
@@ -307,7 +307,7 @@ def parse_args():
     # model
     parser.add_argument("--out_feat", type=int, default=6)
     parser.add_argument("--init_state", default="")
-    parser.add_argument("--model", default="resnet18")
+    parser.add_argument("--pretrained", action="store_true")
     parser.add_argument("--arch", default="alexnet")
 
     # training

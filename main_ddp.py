@@ -131,6 +131,24 @@ def accuracy(output, target, topk=(1,)):
         return res
 
 
+@torch.no_grad()
+def init_memory_bank(model, data_loader, args):
+    """Initialize memory bank"""
+    model.eval()
+
+    for batch in tqdm(data_loader, desc="Initialize", total=len(data_loader), 
+        disable=(args.local_rank % torch.cuda.device_count() != 0)):
+
+        im_k = batch["image"][1].to(args.device)
+        
+        ## DDP: model.module
+        k = model.module.encoder_k(im_k)  # keys: NxC
+        k = nn.functional.normalize(k, dim=1)
+
+        model.module._dequeue_and_enqueue(k) # update memory bank
+    model.module.queue_ptr[0] = 0 # don't change the pointer
+
+
 global_step = -1
 def train_epoch(epoch, model, optimizer, scheduler, data_loader, writer, args):
 
@@ -251,9 +269,12 @@ def main(args):
         num_workers=args.n_workers,
     )
 
+    # set up queue size to ensure divisble by batch size 
+    setup_queue_size(train_loader, args)
+
     # model setting
     arch = torchvision.models.__dict__[args.arch]
-    model = src.model.MoCo(arch, pretrained=args.pretrained, ddp=True)
+    model = src.model.MoCo(arch, K=args.K, pretrained=args.pretrained, ddp=True)
     if args.init_state:
         pprint("load model init state")
         res = load_state_dict_unsafe(
@@ -267,6 +288,10 @@ def main(args):
         device_ids=[args.local_rank],
         output_device=args.local_rank,
     ) ## DDP
+
+    # initialize the model memory bank if use full dataset for comparision
+    if args.use_fullset:
+        init_memory_bank(model, train_loader, args)
 
     # optimizer
     optimizer = torch.optim.SGD(
@@ -303,6 +328,22 @@ def main(args):
         pprint("finished.")
 
 
+# util
+def setup_queue_size(data_loader, args, max_size=65536):
+    """Set up size of queue, should be called before model setup"""
+    ## DDP
+    world_size = torch.distributed.get_world_size()
+    batch_size = args.batch_size * world_size
+    
+    if args.use_fullset: # Prepare for fullset comparision
+        size = min(max_size, len(data_loader.dataset))
+        size = size - size % batch_size
+        args.K = size
+    else:
+        args.K = args.K - args.K % batch_size
+    pprint(f"Setup queue size: K={args.K}")
+
+
 def parse_args():
 
     parser = argparse.ArgumentParser(allow_abbrev=False)
@@ -312,6 +353,10 @@ def parse_args():
     parser.add_argument("--init_state", default="")
     parser.add_argument("--pretrained", action="store_true")
     parser.add_argument("--arch", default="alexnet")
+    parser.add_argument("--K", type=int, default=65536, 
+                        help="size of memory queue, should be divisible by batch_size")
+    parser.add_argument("--use_fullset", action="store_true", 
+                        help="whether to use all data for comparision")
 
     # training
     parser.add_argument("--n_epochs", type=int, default=80)
@@ -329,7 +374,8 @@ def parse_args():
 
     # data
     parser.add_argument("--pin_memory", action="store_false")
-    parser.add_argument("--batch_size", type=int, default=256)
+    parser.add_argument("--batch_size", type=int, default=256, 
+                        help="should be factor of model queue size K")
     parser.add_argument("--n_workers", type=int, default=0)
 
     # other
