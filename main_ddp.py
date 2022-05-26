@@ -146,7 +146,7 @@ def init_memory_bank(model, data_loader, args):
         k = nn.functional.normalize(k, dim=1)
 
         model.module._dequeue_and_enqueue(k) # update memory bank
-        model.module.queue_ptr[0] = 1 # don't change the pointer
+    model.module.queue_ptr[0] = 0 # don't change the pointer
 
 
 global_step = -1
