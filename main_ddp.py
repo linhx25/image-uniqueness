@@ -375,7 +375,7 @@ def parse_args():
     # data
     parser.add_argument("--pin_memory", action="store_false")
     parser.add_argument("--batch_size", type=int, default=256, 
-                        help="should be factor of model queue size K")
+                        help="batch size per GPU; should be factor of model queue size K")
     parser.add_argument("--n_workers", type=int, default=0)
 
     # other
