@@ -115,6 +115,20 @@ def load_model():
     return model
 
 
+def get_our_pred(probs, io_preds, top=10, threshold=0.5):
+    
+    probs, io_preds = probs[:, :top], io_preds[:, :top]
+    indoor = (probs * (io_preds==0).astype(float)).sum(axis=1)
+    outdoor = (probs * (io_preds==1).astype(float)).sum(axis=1)
+
+    # vote for the indoor or outdoor
+    scene = (indoor < outdoor).astype(int) 
+    probs = np.column_stack([indoor, outdoor]).max(axis=1)
+    scene[probs < threshold] = 2
+
+    return scene, probs 
+
+
 if __name__ == "__main__":
     inpath = "/export/projects2/szhang_text_project/Airbnb_unique/photo_library/photo_library_batch0.h5"
     score_path="/export/home/rcsguest/rcs_hlin/Airbnb_unique/image-uniqueness/output/05-26_15:32:10/train_loss.pkl"
@@ -157,19 +171,21 @@ if __name__ == "__main__":
             logit = model(images.to(device))
             h_x = F.softmax(logit, 1).data.squeeze()
             prob, idx = h_x.sort(-1, True)
-            prob = prob.cpu().numpy()[:, 0]
+            prob = prob.cpu().numpy()#[:, 0]
             idx = idx.cpu().numpy()
 
         ## output the IO prediction
-        io_pred = labels_IO[idx[:,:10]].mean(axis=-1) # vote for the indoor or outdoor
-        io_pred = (io_pred > 0.5).astype(int)
+        # io_pred = labels_IO[idx[:,:10]].mean(axis=-1) # vote for the indoor or outdoor
+        # scene = (io_pred > 0.5).astype(int)
+        scene, prob = get_our_pred(prob, labels_IO[idx])
+        # scene = {0:"indoor",1:"outdoor",2:"not_recognized"}[scene]
 
         ## output the prediction of scene category
         cate_pred = itemgetter(*idx[:, 0])(classes)
 
         ## for our forcast
         preds.append(pd.DataFrame({
-            "in/out": io_pred, 
+            "in/out": scene, 
             "scene": cate_pred,
             "prob": prob,
         }, index=ids))

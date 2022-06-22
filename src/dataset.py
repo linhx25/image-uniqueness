@@ -89,7 +89,12 @@ class AirbnbDataLoader(DataLoader):
 
 
 class AirbnbDataset(Dataset):
-    def __init__(self, root: str, transform=None):
+    def __init__(self, root: str, transform=None, image_ids=None):
+        '''
+        root: root path to the data
+        transform: torch transformation
+        image_ids: list, image ids to retrieve
+        '''
         if root.endswith(".h5"):
             self.files = [root]
         else:
@@ -98,6 +103,9 @@ class AirbnbDataset(Dataset):
         self.ds = [h5py.File(f, "r") for f in self.files]
         self.dt_len = [len(f["IDs"]) for f in self.ds]
         self.idx_mapping = self._index2items()
+        if image_ids is not None:
+            self.idx_mapping = self.idx_mapping[self.idx_mapping["image_id"].isin(image_ids)]
+            self.dt_len = list(self.idx_mapping["idx_file"].value_counts().sort_index())
         self.transform = transform
 
     def _index2items(self):
