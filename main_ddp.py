@@ -258,7 +258,14 @@ def main(args):
     transform_train = src.dataset.TwoCropsTransform(transform_train)
 
     # dataset
-    train_ds = src.dataset.AirbnbDataset(args.data_dir, transform=transform_train)
+    if args.scene_dir != "": # dataset based on scene classification 
+        scene = pd.read_pickle(args.scene_dir)
+        image_ids = scene[scene["in/out"]==args.scene].index
+    train_ds = src.dataset.AirbnbDataset(
+        args.data_dir, 
+        transform=transform_train, 
+        image_ids=(image_ids if args.scene_dir != "" else None),
+    )
 
     # dataloader
     sampler = torch.utils.data.distributed.DistributedSampler(train_ds) ## DDP
@@ -384,6 +391,8 @@ def parse_args():
     # other
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--data_dir", default="./data")
+    parser.add_argument("--scene_dir", default="", help="train based on scene classification")
+    parser.add_argument("--scene", type=int, default=0, help="indoor:0, outdoor:1, not_recognized:2")
     parser.add_argument("--outdir", default="./output")
     parser.add_argument("--overwrite", action="store_true")
     parser.add_argument("--save_ckpts", action="store_true")
