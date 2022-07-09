@@ -7,13 +7,14 @@ from torch.nn import functional as F
 from operator import itemgetter
 import sys; sys.path.append("../")
 import src.dataset
-
+import argparse
 import cv2
 from tqdm import tqdm
 from torch.utils.data import DataLoader
 
 ### The GPU output is slightly different from CPU. I don't konw why.
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+
 
 # hacky way to deal with the Pytorch 1.0 update
 def recursion_change_bn(module):
@@ -23,6 +24,7 @@ def recursion_change_bn(module):
         for i, (name, module1) in enumerate(module._modules.items()):
             module1 = recursion_change_bn(module1)
     return module
+
 
 def load_labels():
     # prepare all the labels
@@ -87,7 +89,7 @@ def returnCAM(feature_conv, weight_softmax, class_idx):
     return output_cam
 
 
-def load_model():
+def load_model(hook=False):
     # this model has a last conv feature map as 14x14
 
     model_file = 'wideresnet18_places365.pth.tar'
@@ -108,14 +110,15 @@ def load_model():
 
     model.eval()
     # hook the feature extractor
-    features_names = ['layer4'] # this is the last conv layer of the resnet
-    for name in features_names:
-        model._modules.get(name).register_forward_hook(hook_feature)
+    if hook:
+        features_names = ['layer4'] # this is the last conv layer of the resnet
+        for name in features_names:
+            model._modules.get(name).register_forward_hook(hook_feature)
     
     return model
 
 
-def get_our_pred(probs, io_preds, top=10, threshold=0.5):
+def get_io_pred(probs, io_preds, top=10, threshold=0.5):
     
     probs, io_preds = probs[:, :top], io_preds[:, :top]
     indoor = (probs * (io_preds==0).astype(float)).sum(axis=1)
@@ -129,17 +132,24 @@ def get_our_pred(probs, io_preds, top=10, threshold=0.5):
     return scene, probs 
 
 
+## config
+def parse_args():
+
+    parser = argparse.ArgumentParser(description='Scene Classification')
+    parser.add_argument('--data_path', type=str, default="/export/projects2/szhang_text_project/Airbnb_unique/photo_library/")
+    parser.add_argument('--save_path', type=str, default="../output/06-22_19:15:53/")
+    args = parser.parse_args()
+    return args
+
+
 if __name__ == "__main__":
-    inpath = "/export/projects2/szhang_text_project/Airbnb_unique/photo_library/photo_library_batch0.h5"
-    score_path="/export/home/rcsguest/rcs_hlin/Airbnb_unique/image-uniqueness/output/05-26_15:32:10/train_loss.pkl"
+    
+    args = parse_args()
     
     ## dataset
-    ds = src.dataset.AirbnbDataset(inpath)
+    ds = src.dataset.AirbnbDataset(args.data_path)
     loader = DataLoader(ds, batch_size=64, drop_last=False)
     mapping = ds.idx_mapping.reset_index().set_index("image_id")
-    
-    ## uniqueness
-    uniqueness = pd.read_pickle(score_path)
     
     ## labels
     classes, labels_IO, labels_attribute, W_attribute = load_labels()
@@ -175,9 +185,7 @@ if __name__ == "__main__":
             idx = idx.cpu().numpy()
 
         ## output the IO prediction
-        # io_pred = labels_IO[idx[:,:10]].mean(axis=-1) # vote for the indoor or outdoor
-        # scene = (io_pred > 0.5).astype(int)
-        scene, prob = get_our_pred(prob, labels_IO[idx])
+        scene, prob = get_io_pred(prob, labels_IO[idx])
         # scene = {0:"indoor",1:"outdoor",2:"not_recognized"}[scene]
 
         ## output the prediction of scene category
@@ -190,9 +198,14 @@ if __name__ == "__main__":
             "prob": prob,
         }, index=ids))
 
-    
-    preds = pd.concat(preds).reindex(uniqueness.index)
-    uniqueness[["in/out", "scene", "prob"]] = preds
-    uniqueness.to_pickle("/export/home/rcsguest/rcs_hlin/Airbnb_unique/image-uniqueness/output/05-26_15:32:10/uniqueness.pkl")
+    ## uniqueness
+    if os.path.exists(args.save_path + "train_loss.pkl"):
+        uniqueness = pd.read_pickle(args.save_path + "train_loss.pkl")
+        preds = pd.concat(preds).reindex(uniqueness.index)
+        uniqueness[["in/out", "scene", "prob"]] = preds
+    else:
+        uniqueness = pd.concat(preds)
+        uniqueness["loss"] = np.nan
+    uniqueness.to_pickle(args.save_path + "uniqueness.pkl")
 
         

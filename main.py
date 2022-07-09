@@ -129,18 +129,54 @@ def accuracy(output, target, topk=(1,)):
 @torch.no_grad()
 def init_memory_bank(model, data_loader, args):
     """Initialize memory bank"""
-    model.eval()
+    if args.use_fullset:
+        model.eval()
 
-    for batch in tqdm(data_loader, desc="Initialize", total=len(data_loader)):
+        for batch in tqdm(data_loader, desc="Initialize", total=len(data_loader)):
 
-        im_k = batch["image"][1].to(args.device)
-        
-        ## DDP: model.module
-        k = model.encoder_k(im_k)  # keys: NxC
-        k = nn.functional.normalize(k, dim=1)
+            im_k = batch["image"][1].to(args.device)
+            
+            ## DDP: model.module
+            k = model.encoder_k(im_k)  # keys: NxC
+            k = nn.functional.normalize(k, dim=1)
 
-        model._dequeue_and_enqueue(k) # update memory bank
-    model.queue_ptr[0] = 0 # don't change the pointer
+            model._dequeue_and_enqueue(k) # update memory bank
+        model.queue_ptr[0] = 0 # don't change the pointer
+
+
+# util
+def setup_queue_size(data_loader, args, max_size=65536):
+    """Set up size of queue, should be called before model setup"""
+    ## DDP
+    world_size = torch.distributed.get_world_size()
+    batch_size = args.batch_size * world_size
+    
+    if args.use_fullset: # Prepare for fullset comparision
+        size = min(max_size, len(data_loader.dataset))
+        size = size - size % batch_size
+        args.K = size
+    else:
+        args.K = args.K - args.K % batch_size
+    pprint(f"Setup queue size: K={args.K}")
+
+
+def get_image_ids(args, io=True):
+    """
+    Retrieve image ids in specific scenes.
+    io: (True) use indoor/outdoor scenes
+        (False) use place 365 scenes
+    """
+    if args.scene_dir == "": # dataset based on scene classification 
+        return None
+    else:
+        scene = pd.read_pickle(args.scene_dir)
+        # indoor:0, outdoor:1, not_recognized:2
+        if io:
+            image_ids = scene[scene["in/out"].isin(args.scene)].index
+        # bedroom, kitchen, bathroom, living_room
+        else:
+            image_ids = scene[scene["scene"].isin(args.scene)].index
+        return image_ids
 
 
 global_step = -1
@@ -246,7 +282,11 @@ def main(args):
     transform_train = src.dataset.TwoCropsTransform(transform_train)
 
     # dataset
-    train_ds = src.dataset.AirbnbDataset(args.data_dir, transform=transform_train)
+    train_ds = src.dataset.AirbnbDataset(
+        args.data_dir, 
+        transform=transform_train, 
+        image_ids=get_image_ids(args, True),
+    )
 
     # dataloader
     sampler = None  # torch.utils.data.distributed.DistributedSampler(train_ds) ## DDP
@@ -281,8 +321,7 @@ def main(args):
     # ) ## DDP
     
     # initialize the model memory bank before training
-    if args.use_fullset:
-        init_memory_bank(model, train_loader, args)
+    init_memory_bank(model, train_loader, args)
 
     # optimizer
     optimizer = torch.optim.SGD(
@@ -318,22 +357,6 @@ def main(args):
         with open(outdir + "/info.json", "w") as f:
             json.dump(info, f, indent=4)
         pprint("finished.")
-
-
-# util
-def setup_queue_size(data_loader, args, max_size=65536):
-    """Set up size of queue, should be called before model setup"""
-    # ## DDP
-    # world_size = torch.distributed.get_world_size()
-    # batch_size = args.batch_size * world_size
-    
-    if args.use_fullset: # Prepare for fullset comparision
-        size = min(max_size, len(data_loader.dataset))
-        size = size - size % args.batch_size
-        args.K = size
-    else:
-        args.K = args.K - args.K % args.batch_size
-    pprint(f"Setup queue size: K={args.K}")
 
 
 def parse_args():
@@ -374,13 +397,16 @@ def parse_args():
     # other
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--data_dir", default="./data")
+    parser.add_argument("--scene_dir", default="", 
+                        help="train based on scene classification")
+    parser.add_argument("--scene", default=[0], nargs="+", 
+                        help="indoor:0, outdoor:1, not_recognized:2, or 365 scenes")
     parser.add_argument("--outdir", default="./output")
     parser.add_argument("--overwrite", action="store_true")
     parser.add_argument("--save_ckpts", action="store_true")
     parser.add_argument("--local_rank", type=int, default=0)
-    parser.add_argument(
-        "--comments", default="", help="add comments without indent and dash`-`"
-    )
+    parser.add_argument("--comments", default="", 
+                        help="add comments without indent and dash`-`")
 
     args = parser.parse_args()
     args.device = torch.device("cuda", args.local_rank)
