@@ -95,10 +95,13 @@ class AirbnbDataset(Dataset):
         transform: torch transformation
         image_ids: list, image ids to retrieve
         '''
-        if root.endswith(".h5"):
+        if root.endswith(".h5") or root.endswith(".hdf5"):
             self.files = [root]
         else:
-            self.files = glob.glob(root + "/*.h5")
+            self.files = [
+                t for t in glob.glob(root + "/*")
+                if t.endswith(".h5") or t.endswith(".hdf5")
+            ]
 
         self.ds = [h5py.File(f, "r") for f in self.files]
         self.dt_len = [len(f["IDs"]) for f in self.ds]
@@ -142,6 +145,56 @@ class AirbnbDataset(Dataset):
             img = torchvision.transforms.ToPILImage()(img)
             img = self.transform(img)
         return {"image": img, "label": ids[idx_image],}
+
+
+class AirbnbNYDataset(Dataset):
+    def __init__(self, root: str, transform=None, image_ids=None):
+        '''
+        root: root path to the data
+        transform: torch transformation
+        image_ids: list, image ids to retrieve
+        '''
+        if root.endswith(".h5") or root.endswith(".hdf5"):
+            self.files = [root]
+        else:
+            self.files = [
+                t for t in glob.glob(root + "/*")
+                if t.endswith(".h5") or t.endswith(".hdf5")
+            ]
+
+        self.ds = [h5py.File(f, "r") for f in self.files]
+        self.idx_mapping = self._index2items()
+        if image_ids is not None:
+            self.idx_mapping = self.idx_mapping[self.idx_mapping["image_id"].isin(image_ids)]
+        self.dt_len = list(self.idx_mapping["idx_file"].value_counts().sort_index())
+        self.transform = transform
+        
+    def _index2items(self):
+        
+        res = []
+        for i, f in enumerate(self.ds):
+            for p in f.keys():
+                id_img = f[p].keys()
+                t = zip([i]*len(id_img), [p]*len(id_img), id_img)
+                res.extend(list(t))
+                
+        return pd.DataFrame(res, columns=["idx_file", "idx_image", "image_id"])
+    
+    def __len__(self):
+        return sum(self.dt_len)
+
+    def __getitem__(self, idx: int):
+
+        idx_file = self.idx_mapping.iat[idx, 0]
+        idx_property = self.idx_mapping.iat[idx, 1]
+        image_id = self.idx_mapping.iat[idx, 2]
+        ds = self.ds[idx_file]
+        img = ds[idx_property][image_id][()].astype("uint8")
+        
+        if self.transform:
+            img = torchvision.transforms.ToPILImage()(img)
+            img = self.transform(img)
+        return {"image": img, "label": (idx_property, image_id),}
 
 
 class TwoCropsTransform:

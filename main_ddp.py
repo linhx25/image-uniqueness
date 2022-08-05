@@ -254,14 +254,19 @@ def inference(model, data_loader, args, prefix="Test"):
         images, ids = batch["image"], batch["label"]
         images[0] = images[0].to(args.device)
         images[1] = images[1].to(args.device)
-        ids = ids.to(args.device)
 
         with torch.no_grad():
             output, target = model(im_q=images[0], im_k=images[1])
             loss = loss_fn(output, target)
 
         loss = src.model.concat_all_gather(loss).cpu().numpy()
-        ids = src.model.concat_all_gather(ids).cpu().numpy()
+        if isinstance(ids, torch.Tensor):
+            ids = ids.to(args.device)
+            ids = src.model.concat_all_gather(ids).cpu().numpy()
+        else:
+            ids = src.model.concat_all_gather_object(ids)
+            if ids.shape[1] > 1: # multi-index
+                ids = pd.MultiIndex.from_frame(ids, names=["property_id", "image_id"])
         preds.append(pd.DataFrame({"loss": loss}, index=ids))
 
     preds = pd.concat(preds, axis=0)
@@ -298,7 +303,7 @@ def main(args):
     transform_train = src.dataset.TwoCropsTransform(transform_train)
 
     # dataset
-    train_ds = src.dataset.AirbnbDataset(
+    train_ds = src.dataset.__dict__[args.dataset](
         args.data_dir, 
         transform=transform_train, 
         image_ids=get_image_ids(args, True),
@@ -404,6 +409,7 @@ def parse_args():
 
     # data
     parser.add_argument("--pin_memory", action="store_false")
+    parser.add_argument("--dataset", type=str, default="AirbnbDataset")
     parser.add_argument("--batch_size", type=int, default=256, 
                         help="batch size per GPU; should be factor of model queue size K")
     parser.add_argument("--n_workers", type=int, default=0)

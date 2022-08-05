@@ -2,6 +2,7 @@
 # Based on https://github.com/facebookresearch/moco/blob/main/moco/builder.py
 import torch
 import torch.nn as nn
+import pandas as pd
 
 
 class MoCo(nn.Module):
@@ -186,6 +187,18 @@ def concat_all_gather(tensor):
     torch.distributed.all_gather(tensors_gather, tensor, async_op=False)
 
     output = torch.cat(tensors_gather, dim=0)
+    return output
+
+
+def concat_all_gather_object(obj):
+    """
+    Performs all_gather operation on the provided object: List[Tuple].
+    """
+    obj_list = [None for _ in range(torch.distributed.get_world_size())]
+    torch.distributed.all_gather_object(obj_list, obj)
+
+    output = [pd.DataFrame(obj).T for obj in obj_list]
+    output = pd.concat(output, axis=0)
     return output
 
 
