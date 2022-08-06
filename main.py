@@ -169,6 +169,10 @@ def get_image_ids(args, io=True):
     if args.scene_dir == "": # dataset based on scene classification 
         return None
     else:
+        try:
+            args.scene = [int(s) for s in args.scene]
+        except:
+            io = False
         scene = pd.read_pickle(args.scene_dir)
         # indoor:0, outdoor:1, not_recognized:2
         if io:
@@ -282,7 +286,7 @@ def main(args):
     transform_train = src.dataset.TwoCropsTransform(transform_train)
 
     # dataset
-    train_ds = src.dataset.AirbnbDataset(
+    train_ds = src.dataset.__dict__[args.dataset](
         args.data_dir, 
         transform=transform_train, 
         image_ids=get_image_ids(args, True),
@@ -390,6 +394,7 @@ def parse_args():
 
     # data
     parser.add_argument("--pin_memory", action="store_false")
+    parser.add_argument("--dataset", type=str, default="AirbnbDataset")
     parser.add_argument("--batch_size", type=int, default=256,
                         help="should be factor of model queue size K")
     parser.add_argument("--n_workers", type=int, default=0)
