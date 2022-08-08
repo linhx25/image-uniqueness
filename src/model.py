@@ -197,7 +197,7 @@ def concat_all_gather_object(obj):
     obj_list = [None for _ in range(torch.distributed.get_world_size())]
     torch.distributed.all_gather_object(obj_list, obj)
 
-    output = [pd.DataFrame(obj).T for obj in obj_list]
+    output = [pd.DataFrame(obj).T for obj in obj_list] # TODO: one-dim
     output = pd.concat(output, axis=0)
     return output
 
