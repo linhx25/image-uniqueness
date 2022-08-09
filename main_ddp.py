@@ -265,7 +265,9 @@ def inference(model, data_loader, args, prefix="Test"):
             ids = src.model.concat_all_gather(ids).cpu().numpy()
         else:
             ids = src.model.concat_all_gather_object(ids)
-            if ids.shape[1] > 1: # multi-index
+            if isinstance(ids, pd.Series):
+                ids = pd.Index(ids, names=["image_id"])
+            else: # multi-index
                 ids = pd.MultiIndex.from_frame(ids, names=["property_id", "image_id"])
         preds.append(pd.DataFrame({"loss": loss}, index=ids))
 
@@ -316,7 +318,7 @@ def main(args):
         batch_size=args.batch_size,
         sampler=sampler,
         pin_memory=True,
-        drop_last=True,
+        drop_last=False, # for inference
         shuffle=(sampler is None),
         num_workers=args.n_workers,
     )
