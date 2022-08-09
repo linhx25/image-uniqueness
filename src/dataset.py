@@ -164,8 +164,9 @@ class AirbnbNYDataset(Dataset):
 
         self.ds = [h5py.File(f, "r") for f in self.files]
         self.idx_mapping = self._index2items()
-        if image_ids is not None:
-            self.idx_mapping = self.idx_mapping[self.idx_mapping["image_id"].isin(image_ids)]
+        if image_ids is not None: 
+            m = self.idx_mapping.set_index(["idx_image", "image_id"])
+            self.idx_mapping = self.idx_mapping[m.index.isin(image_ids)]
         self.dt_len = list(self.idx_mapping["idx_file"].value_counts().sort_index())
         self.transform = transform
         

@@ -132,12 +132,40 @@ def get_io_pred(probs, io_preds, top=10, threshold=0.5):
     return scene, probs 
 
 
+def get_image_ids(args, io=True):
+    """
+    Retrieve image ids in specific scenes.
+    io: (True) use indoor/outdoor scenes
+        (False) use place 365 scenes
+    """
+    if args.scene_dir == "": # dataset based on scene classification 
+        return None
+    else:
+        try:
+            args.scene = [int(s) for s in args.scene]
+        except:
+            io = False
+        scene = pd.read_pickle(args.scene_dir)
+        # indoor:0, outdoor:1, not_recognized:2
+        if io:
+            image_ids = scene[scene["in/out"].isin(args.scene)].index
+        # bedroom, kitchen, bathroom, living_room
+        else:
+            image_ids = scene[scene["scene"].isin(args.scene)].index
+        return image_ids
+
+
 ## config
 def parse_args():
 
     parser = argparse.ArgumentParser(description='Scene Classification')
-    parser.add_argument('--data_path', type=str, default="/export/projects2/szhang_text_project/Airbnb_unique/photo_library/")
-    parser.add_argument('--save_path', type=str, default="../output/06-22_19:15:53/")
+    parser.add_argument('--data_dir', type=str, default="/export/projects2/szhang_text_project/Airbnb_unique/photo_library/")
+    parser.add_argument('--outdir', type=str, default="../output/06-22_19:15:53/")
+    parser.add_argument("--dataset", type=str, default="AirbnbDataset")
+    parser.add_argument("--scene_dir", default="", 
+                        help="train based on scene classification")
+    parser.add_argument("--scene", default=[0], nargs="+", 
+                        help="indoor:0, outdoor:1, not_recognized:2, or 365 scenes")
     args = parser.parse_args()
     return args
 
@@ -147,8 +175,12 @@ if __name__ == "__main__":
     args = parse_args()
     
     ## dataset
-    ds = src.dataset.AirbnbDataset(args.data_path)
-    loader = DataLoader(ds, batch_size=64, drop_last=False)
+    ds = src.dataset.__dict__[args.dataset](
+        args.data_dir, 
+        transform=None, 
+        image_ids=get_image_ids(args, True),
+    )
+    loader = DataLoader(ds, batch_size=1440, drop_last=False)
     mapping = ds.idx_mapping.reset_index().set_index("image_id")
     
     ## labels
@@ -161,7 +193,7 @@ if __name__ == "__main__":
     
     ## transform
     tsfm = torchvision.transforms.Compose([
-        torchvision.transforms.Resize((224,224)),
+        torchvision.transforms.Resize((224, 224)),
         torchvision.transforms.ToTensor(),
         torchvision.transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
     ])
@@ -175,6 +207,12 @@ if __name__ == "__main__":
     preds = []
     for batch in tqdm(loader):
         images, ids = batch["image"], batch["label"]
+        if isinstance(ids, torch.Tensor):
+            ids = ids.cpu().numpy()
+        else:
+            ids = pd.DataFrame(ids).T # TODO: one-dim
+            if ids.shape[1] > 1: # multi-index
+                ids = pd.MultiIndex.from_frame(ids, names=["property_id", "image_id"])
         
         ## prediction
         with torch.no_grad():
@@ -199,13 +237,14 @@ if __name__ == "__main__":
         }, index=ids))
 
     ## uniqueness
-    if os.path.exists(args.save_path + "train_loss.pkl"):
-        uniqueness = pd.read_pickle(args.save_path + "train_loss.pkl")
+    if os.path.exists(args.outdir + "/train_loss.pkl"):
+        uniqueness = pd.read_pickle(args.outdir + "/train_loss.pkl")
         preds = pd.concat(preds).reindex(uniqueness.index)
         uniqueness[["in/out", "scene", "prob"]] = preds
     else:
         uniqueness = pd.concat(preds)
         uniqueness["loss"] = np.nan
-    uniqueness.to_pickle(args.save_path + "uniqueness.pkl")
+        uniqueness = uniqueness[['loss', 'in/out', 'scene', 'prob']]
+    uniqueness.to_pickle(args.outdir + "/uniqueness.pkl")
 
         
