@@ -318,7 +318,7 @@ def main(args):
         batch_size=args.batch_size,
         sampler=sampler,
         pin_memory=True,
-        drop_last=False, # for inference
+        drop_last=True,
         shuffle=(sampler is None),
         num_workers=args.n_workers,
     )
