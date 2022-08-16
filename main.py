@@ -61,7 +61,12 @@ def _freeze_modules(epoch, model, args):
         pprint("..unfreeze modules:")
         grad = True
 
-    for name, module in model.named_children():  ## DDP: model.module
+    for name, module in model.encoder_q.named_children():  ## DDP: model.module
+        if (freeze and name in modules) or (not freeze and name not in modules):
+            print(name, end=", ")
+            for param in module.parameters():
+                param.requires_grad_(grad)
+    for name, module in model.encoder_k.named_children():  ## DDP: model.module
         if (freeze and name in modules) or (not freeze and name not in modules):
             print(name, end=", ")
             for param in module.parameters():
@@ -148,7 +153,7 @@ def init_memory_bank(model, data_loader, args):
 def setup_queue_size(data_loader, args, max_size=65536):
     """Set up size of queue, should be called before model setup"""
     ## DDP
-    world_size = torch.distributed.get_world_size()
+    world_size = 1
     batch_size = args.batch_size * world_size
     
     if args.use_fullset: # Prepare for fullset comparision
@@ -236,7 +241,7 @@ def train_epoch(epoch, model, optimizer, scheduler, data_loader, writer, args):
 def inference(model, data_loader, args, prefix="Test"):
 
     model.eval()
-    loss_fn = nn.CrossEntropyLoss().to(args.device)
+    loss_fn = nn.CrossEntropyLoss(reduction="none").to(args.device)
 
     preds = []  # unique score = contrastive loss
 
@@ -249,6 +254,14 @@ def inference(model, data_loader, args, prefix="Test"):
         with torch.no_grad():
             output, target = model(im_q=images[0], im_k=images[1])
             loss = loss_fn(output, target)
+
+        if isinstance(ids, torch.Tensor):
+            ids = ids.cpu().numpy()
+        else:
+            if pd.DataFrame(ids).shape[1] == 1: # one-dim
+                ids = pd.Index(ids, names=["image_id"])
+            else:
+                ids = pd.MultiIndex.from_frame(pd.DataFrame(ids).T, names=["property_id", "image_id"])
 
         preds.append(pd.DataFrame({"loss": loss.cpu().numpy()}, index=ids))
 
