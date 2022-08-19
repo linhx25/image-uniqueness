@@ -144,7 +144,7 @@ class MoCo(nn.Module):
             if i == 0:
                 layers.append(nn.Linear(in_feat, size, bias=False))
             else:
-                layers.append(nn.Linear(projector_size[i-1] , size))
+                layers.append(nn.Linear(projector_size[i-1] , size, bias=False))
             if i != len(projector_size) - 1:
                 layers.append(nn.BatchNorm1d(size))    
                 layers.append(nn.ReLU(inplace=True))
