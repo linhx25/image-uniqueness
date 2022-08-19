@@ -114,21 +114,21 @@ def load_state_dict_unsafe(model, state_dict):
     }
 
 
+@torch.no_grad()
 def accuracy(output, target, topk=(1,)):
     """Computes the accuracy over the k top predictions for the specified values of k"""
-    with torch.no_grad():
-        maxk = max(topk)
-        batch_size = target.size(0)
+    maxk = max(topk)
+    batch_size = target.size(0)
 
-        _, pred = output.topk(maxk, 1, True, True)
-        pred = pred.t()
-        correct = pred.eq(target.reshape(1, -1).expand_as(pred))
+    _, pred = output.topk(maxk, 1, True, True)
+    pred = pred.t()
+    correct = pred.eq(target.reshape(1, -1).expand_as(pred))
 
-        res = []
-        for k in topk:
-            correct_k = correct[:k].reshape(-1).float().sum(0, keepdim=True)
-            res.append(correct_k.mul_(100.0 / batch_size))
-        return res
+    res = []
+    for k in topk:
+        correct_k = correct[:k].reshape(-1).float().sum(0, keepdim=True)
+        res.append(correct_k.mul_(100.0 / batch_size))
+    return res
 
 
 @torch.no_grad()
@@ -327,8 +327,13 @@ def main(args):
     setup_queue_size(train_loader, args)
 
     # model setting
-    arch = torchvision.models.__dict__[args.arch]
-    model = src.model.MoCo(arch, K=args.K, pretrained=args.pretrained, ddp=True)
+    model = src.model.__dict__[args.model](
+        torchvision.models.__dict__[args.arch], 
+        K=args.K, 
+        pretrained=args.pretrained, 
+        projector_size=args.projector_size,
+        ddp=True,
+    )
     if args.init_state:
         pprint("load model init state")
         res = load_state_dict_unsafe(
@@ -390,6 +395,8 @@ def parse_args():
     parser.add_argument("--init_state", default="")
     parser.add_argument("--pretrained", action="store_true")
     parser.add_argument("--arch", default="alexnet")
+    parser.add_argument("--model", default="MoCo")
+    parser.add_argument("--projector_size", type=int, default=[128], nargs="+")
     parser.add_argument("--K", type=int, default=65536, 
                         help="size of memory queue, should be divisible by batch_size")
     parser.add_argument("--use_fullset", action="store_true", 

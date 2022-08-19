@@ -11,12 +11,23 @@ class MoCo(nn.Module):
     https://arxiv.org/abs/1911.05722
     """
 
-    def __init__(self, base_encoder, dim=128, K=65536, m=0.999, T=0.07, pretrained=False, ddp=False):
+    def __init__(self, 
+            base_encoder, 
+            dim=128, 
+            K=65536, 
+            m=0.999, 
+            T=0.07, 
+            pretrained=False, 
+            projector_size=[128],
+            ddp=False,
+        ):
         """
         dim: feature dimension (default: 128)
         K: queue size; number of negative keys (default: 65536)
         m: moco momentum of updating key encoder (default: 0.999)
         T: softmax temperature (default: 0.07)
+        pretrained: whether load pretrained weights
+        projector_size: hidden size of projection head
         """
         super(MoCo, self).__init__()
 
@@ -26,15 +37,16 @@ class MoCo(nn.Module):
         self.ddp = ddp
 
         # create the encoders
-        # num_classes is the output fc dimension
-        if pretrained:
-            self.encoder_q = base_encoder(pretrained=True)
-            self.encoder_q.fc = nn.Linear(self.encoder_q.fc.in_features, dim)
-            self.encoder_k = base_encoder(pretrained=True)
-            self.encoder_k.fc = nn.Linear(self.encoder_k.fc.in_features, dim)
-        else:
-            self.encoder_q = base_encoder(num_classes=dim)
-            self.encoder_k = base_encoder(num_classes=dim)
+        self.encoder_q = base_encoder(pretrained=pretrained)
+        self.encoder_k = base_encoder(pretrained=pretrained)
+        
+        # replace projection head (ResNet)
+        projection_head = self.encoder_q.fc
+        in_feat = projection_head.in_features
+        projector_size[-1] = dim
+        
+        self.encoder_q.fc = self._build_mlp(in_feat, projector_size)
+        self.encoder_k.fc = self._build_mlp(in_feat, projector_size)
 
         for param_q, param_k in zip(
             self.encoder_q.parameters(), self.encoder_k.parameters()
@@ -126,6 +138,20 @@ class MoCo(nn.Module):
         else:
             return x_gather
 
+    def _build_mlp(self, in_feat, projector_size):
+        layers = []
+        for i, size in enumerate(projector_size):
+            if i == 0:
+                layers.append(nn.Linear(in_feat, size, bias=False))
+            else:
+                layers.append(nn.Linear(projector_size[i-1] , size))
+            if i != len(projector_size) - 1:
+                layers.append(nn.BatchNorm1d(size))    
+                layers.append(nn.ReLU(inplace=True))
+            else: # SimCLR
+                layers.append(nn.BatchNorm1d(size, affine=False))
+        return nn.Sequential(*layers)
+
     def forward(self, im_q, im_k):
         """
         Input:
@@ -173,6 +199,61 @@ class MoCo(nn.Module):
 
         return logits, labels
 
+
+class MoCo_VGG(MoCo):
+    def __init__(self, 
+            base_encoder, 
+            dim=128, 
+            K=65536, 
+            m=0.999, 
+            T=0.07, 
+            pretrained=False, 
+            projector_size=[4096, 4096, 128],
+            ddp=False,
+        ):
+        """
+        dim: feature dimension (default: 128)
+        K: queue size; number of negative keys (default: 65536)
+        m: moco momentum of updating key encoder (default: 0.999)
+        T: softmax temperature (default: 0.07)
+        pretrained: whether load pretrained weights
+        train_module: name of projection head in base_encoder
+        projection_layer: number of layers of projection head
+        projector_size: hidden size of projection head
+        """
+        super(MoCo, self).__init__() # do not inherit MoCo.__init__
+        self.K = K
+        self.m = m
+        self.T = T
+        self.ddp = ddp
+
+        # create the encoders
+        self.encoder_q = base_encoder(pretrained=pretrained)
+        self.encoder_k = base_encoder(pretrained=pretrained)
+        
+        # replace projection head (VGG)
+        projection_head = self.encoder_q.classifier
+        if isinstance(projection_head, nn.Sequential):
+            in_feat = list(projection_head.children())[0].in_features
+        else:
+            in_feat = projection_head.in_features
+        projector_size[-1] = dim
+        
+        self.encoder_q.classifier = self._build_mlp(in_feat, projector_size)
+        self.encoder_k.classifier = self._build_mlp(in_feat, projector_size)
+
+        for param_q, param_k in zip(
+            self.encoder_q.parameters(), self.encoder_k.parameters()
+        ):
+            param_k.data.copy_(param_q.data)  # initialize
+            param_k.requires_grad = False  # not update by gradient
+
+        # create the queue
+        self.register_buffer("queue", torch.randn(dim, K))
+        self.queue = nn.functional.normalize(self.queue, dim=0)
+
+        self.register_buffer("queue_ptr", torch.zeros(1, dtype=torch.long))        
+    
 
 # utils
 @torch.no_grad()
