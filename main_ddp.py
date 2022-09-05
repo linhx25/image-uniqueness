@@ -394,7 +394,7 @@ def parse_args():
     parser.add_argument("--out_feat", type=int, default=6)
     parser.add_argument("--init_state", default="")
     parser.add_argument("--pretrained", action="store_true")
-    parser.add_argument("--arch", default="alexnet")
+    parser.add_argument("--arch", default="resnet18")
     parser.add_argument("--model", default="MoCo")
     parser.add_argument("--projector_size", type=int, default=[128], nargs="+")
     parser.add_argument("--K", type=int, default=65536, 
