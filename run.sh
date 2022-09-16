@@ -18,5 +18,7 @@ bsub -M 30G -q gpu -gpu "num=5" -o inference.log \
 python -m torch.distributed.launch --nproc_per_node=5 ./main_ddp.py --data_dir ${data_dir} --init_state ${init_state} --scene_dir ${scene_dir} --n_epochs 0 --arch resnet18 --batch_size 256 --freeze_modules ~fc,avgpool,layer4 --freeze_first_n_epochs 40 --dataset AirbnbNYDataset
 
 # inference alone on all NY data + PS data (in the data_dir)
+scene_dir="./output/data/infer_ps_NY_idx.pkl"
+data_dir="/export/projects2/szhang_text_project/Airbnb_Images_NYC/"
 bsub -M 30G -q gpu -gpu "num=5" -o inference.log \
-python -m torch.distributed.launch --nproc_per_node=5 ./main_ddp.py --data_dir "/export/projects2/szhang_text_project/Airbnb_Images_NYC/" --init_state ${init_state} --scene_dir ${scene_dir} --n_epochs 0 --arch resnet18 --batch_size 256 --freeze_modules ~fc,avgpool,layer4  --freeze_first_n_epochs 40 --dataset AirbnbNYDataset
+python -m torch.distributed.launch --nproc_per_node=5 ./main_ddp.py --data_dir ${data_dir} --init_state ${init_state} --scene_dir ${scene_dir} --n_epochs 0 --arch resnet18 --batch_size 256 --freeze_modules ~fc,avgpool,layer4  --freeze_first_n_epochs 40 --dataset AirbnbNYDataset
